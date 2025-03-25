@@ -1,44 +1,49 @@
 import os
 from flask import Flask, render_template, request, send_file
-import yt_dlp
+from yt_dlp import YoutubeDL
 
 app = Flask(__name__)
 
-# Create a folder to store downloads
-DOWNLOAD_FOLDER = "downloads"
-os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
+# FFmpeg Path (Downloaded in render-build.sh)
+FFMPEG_PATH = os.path.abspath("ffmpeg/ffmpeg")
 
-# Options for yt-dlp
-def get_ydl_opts(format_choice):
-    opts = {
-        "format": "bestaudio/best" if format_choice == "mp3" else "best",
-        "outtmpl": f"{DOWNLOAD_FOLDER}/%(title)s.%(ext)s",
+
+def download_video(url, format_type):
+    """Downloads YouTube video in the specified format."""
+    ydl_opts = {
+        "format": "bestvideo+bestaudio/best" if format_type == "mp4" else "bestaudio/best",
+        "outtmpl": "downloads/%(title)s.%(ext)s",
+        "ffmpeg_location": FFMPEG_PATH,  # Use custom FFmpeg path
+        "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3"}] if format_type == "mp3" else [],
     }
-    if format_choice == "mp3":
-        opts["postprocessors"] = [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "mp3",
-            "preferredquality": "192",
-        }]
-        opts["ffmpeg_location"] = "/usr/bin/ffmpeg"  # Set FFmpeg path
-    return opts
+
+    with YoutubeDL(ydl_opts) as ydl:
+        info_dict = ydl.extract_info(url, download=True)
+        filename = ydl.prepare_filename(info_dict)
+        if format_type == "mp3":
+            filename = filename.rsplit(".", 1)[0] + ".mp3"
+    
+    return filename
+
 
 @app.route("/", methods=["GET", "POST"])
 def index():
+    """Handles form submission and downloads video."""
     if request.method == "POST":
-        url = request.form["url"]
-        format_choice = request.form["format"]
+        url = request.form.get("url")
+        format_type = request.form.get("format", "mp4")
+
+        if not url:
+            return render_template("index.html", error="Please enter a valid YouTube URL.")
 
         try:
-            with yt_dlp.YoutubeDL(get_ydl_opts(format_choice)) as ydl:
-                info = ydl.extract_info(url, download=True)
-                filename = ydl.prepare_filename(info).replace(".webm", f".{format_choice}")
-
-            return send_file(filename, as_attachment=True)
+            filepath = download_video(url, format_type)
+            return send_file(filepath, as_attachment=True)
         except Exception as e:
-            return f"Error: {e}"
+            return render_template("index.html", error=f"Error: {e}")
 
     return render_template("index.html")
+
 
 if __name__ == "__main__":
     app.run(debug=True)
