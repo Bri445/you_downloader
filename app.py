@@ -1,49 +1,55 @@
-import os
 from flask import Flask, render_template, request, send_file
-from yt_dlp import YoutubeDL
+import yt_dlp
+import os
+import uuid
 
 app = Flask(__name__)
 
-# FFmpeg Path (Downloaded in render-build.sh)
-FFMPEG_PATH = os.path.abspath("ffmpeg/ffmpeg")
-
-
-def download_video(url, format_type):
-    """Downloads YouTube video in the specified format."""
-    ydl_opts = {
-        "format": "bestvideo+bestaudio/best" if format_type == "mp4" else "bestaudio/best",
-        "outtmpl": "downloads/%(title)s.%(ext)s",
-        "ffmpeg_location": FFMPEG_PATH,  # Use custom FFmpeg path
-        "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3"}] if format_type == "mp3" else [],
-    }
-
-    with YoutubeDL(ydl_opts) as ydl:
-        info_dict = ydl.extract_info(url, download=True)
-        filename = ydl.prepare_filename(info_dict)
-        if format_type == "mp3":
-            filename = filename.rsplit(".", 1)[0] + ".mp3"
-    
-    return filename
-
-
-@app.route("/", methods=["GET", "POST"])
+@app.route('/')
 def index():
-    """Handles form submission and downloads video."""
-    if request.method == "POST":
-        url = request.form.get("url")
-        format_type = request.form.get("format", "mp4")
+    return render_template('index.html')
 
-        if not url:
-            return render_template("index.html", error="Please enter a valid YouTube URL.")
+@app.route('/download', methods=['POST'])
+def download():
+    url = request.form.get('url')
+    download_type = request.form.get('type')
 
-        try:
-            filepath = download_video(url, format_type)
-            return send_file(filepath, as_attachment=True)
-        except Exception as e:
-            return render_template("index.html", error=f"Error: {e}")
+    if not url or not download_type:
+        return "Missing data"
 
-    return render_template("index.html")
+    temp_filename = str(uuid.uuid4())
 
+    ydl_opts = {}
 
-if __name__ == "__main__":
-    app.run(debug=True)
+    if download_type == "video":
+        ydl_opts = {
+            'outtmpl': f'{temp_filename}.mp4',
+            'format': 'bestvideo+bestaudio/best'
+        }
+    elif download_type == "audio":
+        ydl_opts = {
+            'outtmpl': f'{temp_filename}.mp3',
+            'format': 'bestaudio[ext=mp3]/bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+        }
+    else:
+        return "Invalid type"
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+
+        file_path = f"{temp_filename}.{'mp3' if download_type == 'audio' else 'mp4'}"
+        return send_file(file_path, as_attachment=True)
+    finally:
+        if os.path.exists(f"{temp_filename}.mp4"):
+            os.remove(f"{temp_filename}.mp4")
+        if os.path.exists(f"{temp_filename}.mp3"):
+            os.remove(f"{temp_filename}.mp3")
+
+if __name__ == '__main__':
+    app.run(host="0.0.0.0", port=5000)
